@@ -1,10 +1,7 @@
-#include <Magick++.h>
-
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <iomanip>
 #include <iostream>
 #include <string>
 #include <tuple>
@@ -183,69 +180,6 @@ class QLearningAgent {
     }
   }
 
-  void visualizePolicyGIF(const std::string &filename, int maxSteps = 200,
-                          int cellSize = 20) {
-    if (filename.empty()) return;
-    Magick::InitializeMagick(nullptr);
-    std::vector<Magick::Image> frames;
-    auto s = env.getSize();
-
-    auto state = env.reset();
-    bool done = false;
-
-    for (int stepCount = 0; stepCount < maxSteps && !done; stepCount++) {
-      Magick::Image frame(Magick::Geometry(s * cellSize, s * cellSize),
-                          "white");
-      frame.magick("GIF");
-
-      for (int x = 0; x < s; x++) {
-        for (int y = 0; y < s; y++) {
-          if (env.isMine(x, y)) {
-            for (int px = 0; px < cellSize; px++) {
-              for (int py = 0; py < cellSize; py++) {
-                frame.pixelColor(y * cellSize + py, x * cellSize + px,
-                                 Magick::Color("red"));
-              }
-            }
-          } else if (env.isFlag(x, y)) {
-            for (int px = 0; px < cellSize; px++) {
-              for (int py = 0; py < cellSize; py++) {
-                frame.pixelColor(y * cellSize + py, x * cellSize + px,
-                                 Magick::Color("green"));
-              }
-            }
-          } else {
-            for (int px = 0; px < cellSize; px++) {
-              for (int py = 0; py < cellSize; py++) {
-                frame.pixelColor(y * cellSize + py, x * cellSize + px,
-                                 Magick::Color("white"));
-              }
-            }
-          }
-        }
-      }
-
-      int ax = state.first;
-      int ay = state.second;
-      for (int px = 0; px < cellSize; px++) {
-        for (int py = 0; py < cellSize; py++) {
-          frame.pixelColor(ay * cellSize + py, ax * cellSize + px,
-                           Magick::Color("blue"));
-        }
-      }
-
-      frame.animationDelay(5);
-      frames.push_back(frame);
-
-      int act = bestAction(ax, ay);
-      auto result = env.step(act);
-      state = std::get<0>(result);
-      done = std::get<2>(result);
-    }
-
-    Magick::writeImages(frames.begin(), frames.end(), filename);
-  }
-
  private:
   GridWorld &env;
   double alpha;
@@ -297,7 +231,6 @@ int main(int argc, char **argv) {
   QLearningAgent agent(env, alpha, gamma, epsilon);
   agent.train(episodes);
   agent.printPolicy();
-  agent.visualizePolicyGIF(gifPath, maxSteps, cellSize);
 
   return 0;
 }

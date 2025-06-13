@@ -1,7 +1,4 @@
-#include <Magick++.h>
-
 #include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,8 +35,8 @@ __device__ __constant__ float d_GAMMA;
 __device__ __constant__ float d_EPSILON;
 __device__ __constant__ int d_MAX_STEPS;
 
-__device__ int d_grid[1024 * 1024];
-__device__ float d_Q[1024 * 1024 * 4];
+__device__ int *d_grid;
+__device__ float *d_Q;
 
 __device__ void atomicUpdateQ(int x, int y, int action, float tdTarget,
                               float alpha, int size) {
@@ -189,101 +186,6 @@ void printPolicyCPU(const std::vector<int> &h_grid,
   }
 }
 
-void visualizePolicyGIF(const std::string &filename,
-                        const std::vector<int> &h_grid,
-                        const std::vector<float> &h_Q, int size, int flag_x,
-                        int flag_y, int cellSize, int maxSteps) {
-  if (filename.empty()) return;
-  Magick::InitializeMagick(nullptr);
-  std::vector<Magick::Image> frames;
-
-  int agentX = 0, agentY = 0;
-  bool done = false;
-
-  for (int stepCount = 0; stepCount < maxSteps && !done; stepCount++) {
-    Magick::Image frame(Magick::Geometry(size * cellSize, size * cellSize),
-                        "white");
-    frame.magick("GIF");
-
-    for (int x = 0; x < size; x++) {
-      for (int y = 0; y < size; y++) {
-        int idx = x * size + y;
-        if (h_grid[idx] == -1) {
-          for (int px = 0; px < cellSize; px++) {
-            for (int py = 0; py < cellSize; py++) {
-              frame.pixelColor(y * cellSize + py, x * cellSize + px,
-                               Magick::Color("red"));
-            }
-          }
-        } else if (x == flag_x && y == flag_y) {
-          for (int px = 0; px < cellSize; px++) {
-            for (int py = 0; py < cellSize; py++) {
-              frame.pixelColor(y * cellSize + py, x * cellSize + px,
-                               Magick::Color("green"));
-            }
-          }
-        } else {
-          for (int px = 0; px < cellSize; px++) {
-            for (int py = 0; py < cellSize; py++) {
-              frame.pixelColor(y * cellSize + py, x * cellSize + px,
-                               Magick::Color("white"));
-            }
-          }
-        }
-      }
-    }
-
-    for (int px = 0; px < cellSize; px++) {
-      for (int py = 0; py < cellSize; py++) {
-        frame.pixelColor(agentY * cellSize + py, agentX * cellSize + px,
-                         Magick::Color("blue"));
-      }
-    }
-
-    frame.animationDelay(5);
-    frames.push_back(frame);
-
-    int idx = agentX * size + agentY;
-    if (h_grid[idx] == -1) {
-      done = true;
-      continue;
-    }
-    if (agentX == flag_x && agentY == flag_y) {
-      done = true;
-      continue;
-    }
-
-    float bestVal = h_Q[idx * 4];
-    int bestAct = 0;
-    for (int a = 1; a < 4; a++) {
-      float val = h_Q[idx * 4 + a];
-      if (val > bestVal) {
-        bestVal = val;
-        bestAct = a;
-      }
-    }
-
-    if (bestAct == 0) {
-      agentX = (agentX > 0) ? agentX - 1 : agentX;
-    } else if (bestAct == 1) {
-      agentX = (agentX < size - 1) ? agentX + 1 : agentX;
-    } else if (bestAct == 2) {
-      agentY = (agentY > 0) ? agentY - 1 : agentY;
-    } else if (bestAct == 3) {
-      agentY = (agentY < size - 1) ? agentY + 1 : agentY;
-    }
-
-    idx = agentX * size + agentY;
-    if (h_grid[idx] == -1) {
-      done = true;
-    } else if (agentX == flag_x && agentY == flag_y) {
-      done = true;
-    }
-  }
-
-  Magick::writeImages(frames.begin(), frames.end(), filename);
-}
-
 int main(int argc, char **argv) {
   int size = 32;
   int n_mines = 40;
@@ -347,12 +249,21 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaMemcpyToSymbol(d_EPSILON, &epsilon, sizeof(float)));
   CHECK_CUDA(cudaMemcpyToSymbol(d_MAX_STEPS, &max_steps, sizeof(int)));
 
+  // alloc d_grid mem
   int gridMem = size * size;
-  CHECK_CUDA(cudaMemcpyToSymbol(d_grid, h_grid.data(), sizeof(int) * gridMem));
+  int *d_grid_ptr;
+  CHECK_CUDA(cudaMalloc(&d_grid_ptr, gridMem * sizeof(int)));
+  CHECK_CUDA(cudaMemcpyToSymbol(d_grid, &d_grid_ptr, sizeof(int *)));
+  CHECK_CUDA(cudaMemcpy(d_grid_ptr, h_grid.data(), gridMem * sizeof(int),
+                        cudaMemcpyHostToDevice));
 
   int qMem = size * size * 4;
+  float *d_Q_ptr;
   std::vector<float> h_Q(qMem, 0.0f);
-  CHECK_CUDA(cudaMemcpyToSymbol(d_Q, h_Q.data(), sizeof(float) * qMem));
+  CHECK_CUDA(cudaMalloc(&d_Q_ptr, qMem * sizeof(float)));
+  CHECK_CUDA(cudaMemcpyToSymbol(d_Q, &d_Q_ptr, sizeof(float *)));
+  CHECK_CUDA(cudaMemcpy(d_Q_ptr, h_Q.data(), qMem * sizeof(float),
+                        cudaMemcpyHostToDevice));
 
   int totalThreads = blocks * threads_per_block;
   curandStateSimple *d_randStates;
@@ -371,11 +282,11 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaDeviceSynchronize());
   CHECK_CUDA(cudaFree(d_randStates));
 
-  CHECK_CUDA(cudaMemcpyFromSymbol(h_Q.data(), d_Q, sizeof(float) * qMem));
+  CHECK_CUDA(cudaMemcpyFromSymbol(&d_Q_ptr, d_Q, sizeof(float *)));
+  CHECK_CUDA(cudaMemcpy(h_Q.data(), d_Q_ptr, qMem * sizeof(float),
+                        cudaMemcpyDeviceToHost));
 
   printPolicyCPU(h_grid, h_Q, size, flag_x, flag_y);
-  visualizePolicyGIF(gifPath, h_grid, h_Q, size, flag_x, flag_y, cellSize,
-                     gifMaxSteps);
 
   return 0;
 }
