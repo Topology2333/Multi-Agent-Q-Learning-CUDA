@@ -1,21 +1,8 @@
-import argparse
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.animation import PillowWriter, FuncAnimation
-import tqdm
+import argparse import numpy as np import matplotlib.pyplot as plt from matplotlib.animation import PillowWriter, FuncAnimation import tqdm
 
-class GridWorld:
-    def __init__(self, size, n_mines, flag_pos):
-        self.size = size
-        self.n_mines = n_mines
-        self.flag_pos = flag_pos
-        self.grid = np.zeros((size, size))
-        self.mines = self.place_mines()
-        self.state = (0, 0)
+    class GridWorld:def __init__(self, size, n_mines, flag_pos) :self.size = size self.n_mines = n_mines self.flag_pos = flag_pos self.grid = np.zeros((size, size)) self.mines = self.place_mines() self.state =(0, 0)
 
-    def place_mines(self):
-        mines = []
-        while len(mines) < self.n_mines:
+                                                                                                                                                                                                                      def place_mines(self) :mines =[] while len(mines) < self.n_mines:
             pos = (np.random.randint(0, self.size), np.random.randint(0, self.size))
             if pos not in mines and pos != (0, 0) and pos != self.flag_pos:
                 mines.append(pos)

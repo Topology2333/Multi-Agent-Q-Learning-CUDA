@@ -1,4 +1,5 @@
-# Single and Multi-Agent Reinforcement Learning (Q-Learning) with CUDA, C++ and Python
+#Single and Multi - Agent Reinforcement Learning(Q - Learning) with CUDA, \
+    C++and Python
 
 Girish Krishnan | [LinkedIn](https://www.linkedin.com/in/girk/) | [GitHub](https://github.com/Girish-Krishnan)
 ___
@@ -237,7 +238,9 @@ Here is an example output visualization obtained from running one of the C++ pro
 
 ### Single-Agent Q-Learning
 
-1. Initialize a Q-table of size $\text{gridSize} \times \text{gridSize} \times 4$, where the 4 represents the 4 possible actions (up, down, left, right).
+1. Initialize a Q-table of size $\text{
+      gridSize} \times \text{
+      gridSize} \times 4$, where the 4 represents the 4 possible actions (up, down, left, right).
 2. Start the agent at position $(0,0)$.
 3. At each step, choose an action $a$ using an $\epsilon$-greedy policy, where $\epsilon$ is the exploration rate.
 4. Execute the action, observe the next state $s'$ and the reward $r$.

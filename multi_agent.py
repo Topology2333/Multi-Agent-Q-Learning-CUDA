@@ -1,23 +1,8 @@
-import argparse
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.animation import PillowWriter, FuncAnimation
-import tqdm
+import argparse import numpy as np import matplotlib.pyplot as plt from matplotlib.animation import PillowWriter, FuncAnimation import tqdm
 
-class MultiAgentGridWorld:
-    def __init__(self, size, n_mines, flag_pos, n_agents):
-        self.size = size
-        self.n_mines = n_mines
-        self.flag_pos = flag_pos
-        self.n_agents = n_agents
-        self.grid = np.zeros((size, size))
-        self.mines = self.place_mines()
-        self.agent_states = [(0, 0) for _ in range(n_agents)]
-        self.active_agents = [True for _ in range(n_agents)]
+    class MultiAgentGridWorld:def __init__(self, size, n_mines, flag_pos, n_agents) :self.size = size self.n_mines = n_mines self.flag_pos = flag_pos self.n_agents = n_agents self.grid = np.zeros((size, size)) self.mines = self.place_mines() self.agent_states =[(0, 0) for _ in range(n_agents)] self.active_agents =[True for _ in range(n_agents)]
 
-    def place_mines(self):
-        mines = []
-        while len(mines) < self.n_mines:
+                                                                                                                                                                                                                                                                       def place_mines(self) :mines =[] while len(mines) < self.n_mines:
             pos = (np.random.randint(0, self.size), np.random.randint(0, self.size))
             if pos not in mines and pos != (0, 0) and pos != self.flag_pos:
                 mines.append(pos)
