@@ -362,17 +362,21 @@ int main(int argc, char **argv) {
   dim3 gridDims(blocks, 1, 1);
   dim3 blockDims(threads_per_block, 1, 1);
 
+  // cuda stream
+  cudaStream_t stream;
+  CHECK_CUDA(cudaStreamCreate(&stream));
+
   __global__ void initRandKernel(SimpleCurand * randStates, unsigned int seed);
   // redeclare or do it inline? We'll do it inline here to avoid confusion, but
   // let's reuse the same signature: We must define it above or we won't
   // compile. It's above. We'll call it now:
 
-  initRandKernel<<<gridDims, blockDims>>>(d_randStates, seed);
-  CHECK_CUDA(cudaDeviceSynchronize());
+  initRandKernel<<<gridDims, blockDims, 0, stream>>>(d_randStates, seed);
+  CHECK_CUDA(cudaStreamSynchronize(stream));
 
   for (int ep = 0; ep < episodes; ep++) {
-    resetAgentsKernel<<<gridDims, blockDims>>>();
-    CHECK_CUDA(cudaDeviceSynchronize());
+    resetAgentsKernel<<<gridDims, blockDims, 0, stream>>>();
+    CHECK_CUDA(cudaStreamSynchronize(stream));
 
     int stepCount = 0;
     while (stepCount < max_steps_per_episode) {
@@ -380,22 +384,23 @@ int main(int argc, char **argv) {
       std::vector<int> h_done(n_agents, 0);
       int *d_done;
       CHECK_CUDA(cudaMalloc(&d_done, n_agents * sizeof(int)));
-      CHECK_CUDA(cudaMemcpy(d_done, h_done.data(), n_agents * sizeof(int),
-                            cudaMemcpyHostToDevice));
+      CHECK_CUDA(cudaMemcpyAsync(d_done, h_done.data(), n_agents * sizeof(int),
+                                 cudaMemcpyHostToDevice, stream));
 
-      stepAgentsKernel<<<gridDims, blockDims>>>(d_randStates, d_done);
-      CHECK_CUDA(cudaDeviceSynchronize());
+      stepAgentsKernel<<<gridDims, blockDims, 0, stream>>>(d_randStates,
+                                                           d_done);
+      CHECK_CUDA(cudaStreamSynchronize(stream));
 
       int *d_countActive;
       CHECK_CUDA(cudaMalloc(&d_countActive, sizeof(int)));
       CHECK_CUDA(cudaMemset(d_countActive, 0, sizeof(int)));
 
-      countActiveKernel<<<gridDims, blockDims>>>(d_countActive);
-      CHECK_CUDA(cudaDeviceSynchronize());
+      countActiveKernel<<<gridDims, blockDims, 0, stream>>>(d_countActive);
+      CHECK_CUDA(cudaStreamSynchronize(stream));
 
       int h_countActive = 0;
-      CHECK_CUDA(cudaMemcpy(&h_countActive, d_countActive, sizeof(int),
-                            cudaMemcpyDeviceToHost));
+      CHECK_CUDA(cudaMemcpyAsync(&h_countActive, d_countActive, sizeof(int),
+                                 cudaMemcpyDeviceToHost, stream));
 
       CHECK_CUDA(cudaFree(d_countActive));
       CHECK_CUDA(cudaFree(d_done));
@@ -407,8 +412,8 @@ int main(int argc, char **argv) {
     }
   }
 
-  CHECK_CUDA(
-      cudaMemcpy(h_Q.data(), d_QPtr, qSizeInBytes, cudaMemcpyDeviceToHost));
+  CHECK_CUDA(cudaMemcpyAsync(h_Q.data(), d_QPtr, qSizeInBytes,
+                             cudaMemcpyDeviceToHost, stream));
 
   printPolicyCPU(h_grid, h_Q, size, flag_x, flag_y);
 
