@@ -370,6 +370,11 @@ int main(int argc, char **argv) {
   initRandKernel<<<gridDims, blockDims>>>(d_randStates, seed);
   CHECK_CUDA(cudaDeviceSynchronize());
 
+  int *d_done;
+  CHECK_CUDA(cudaMalloc(&d_done, n_agents * sizeof(int)));
+  int *d_countActive;
+  CHECK_CUDA(cudaMalloc(&d_countActive, sizeof(int)));
+
   for (int ep = 0; ep < episodes; ep++) {
     resetAgentsKernel<<<gridDims, blockDims>>>();
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -377,17 +382,11 @@ int main(int argc, char **argv) {
     int stepCount = 0;
     while (stepCount < max_steps_per_episode) {
       stepCount++;
-      std::vector<int> h_done(n_agents, 0);
-      int *d_done;
-      CHECK_CUDA(cudaMalloc(&d_done, n_agents * sizeof(int)));
-      CHECK_CUDA(cudaMemcpy(d_done, h_done.data(), n_agents * sizeof(int),
-                            cudaMemcpyHostToDevice));
+      cudaMemset(d_done, 0, n_agents * sizeof(int));
 
       stepAgentsKernel<<<gridDims, blockDims>>>(d_randStates, d_done);
       CHECK_CUDA(cudaDeviceSynchronize());
 
-      int *d_countActive;
-      CHECK_CUDA(cudaMalloc(&d_countActive, sizeof(int)));
       CHECK_CUDA(cudaMemset(d_countActive, 0, sizeof(int)));
 
       countActiveKernel<<<gridDims, blockDims>>>(d_countActive);
@@ -397,15 +396,15 @@ int main(int argc, char **argv) {
       CHECK_CUDA(cudaMemcpy(&h_countActive, d_countActive, sizeof(int),
                             cudaMemcpyDeviceToHost));
 
-      CHECK_CUDA(cudaFree(d_countActive));
-      CHECK_CUDA(cudaFree(d_done));
-
       if (h_countActive == 0)
         break;
       if ((float)h_countActive < 0.2f * (float)n_agents)
         break;
     }
   }
+
+  CHECK_CUDA(cudaFree(d_done));
+  CHECK_CUDA(cudaFree(d_countActive));
 
   CHECK_CUDA(
       cudaMemcpy(h_Q.data(), d_QPtr, qSizeInBytes, cudaMemcpyDeviceToHost));
