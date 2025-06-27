@@ -103,7 +103,7 @@ __global__ void runEpisodesKernel(int totalEpisodes,
     int x = 0, y = 0;
     bool done = false;
     int steps = 0;
-    while (!done && steps < d_MAX_STEPS) {
+    while (!done) { // && steps < d_MAX_STEPS) {
       steps++;
       int action = chooseActionDev(x, y, d_EPSILON, &localState, size);
       int oldX = x;

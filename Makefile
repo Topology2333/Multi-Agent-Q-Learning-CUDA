@@ -14,5 +14,8 @@ mc:
 mg:
 	$(NVCC) $(CXXFLAGS) ./multi_agent.cu -o multi_agent_cu
 
+sarsa:
+	$(NVCC) $(CXXFLAGS) ./sarsa.cu -o sarsa
+
 clean:
-	rm single_agent single_agent_cu multi_agent multi_agent_cu
+	rm -rf single_agent single_agent_cu multi_agent multi_agent_cu sarsa

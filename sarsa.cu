@@ -3,7 +3,6 @@
 #include <cstring>
 #include <ctime>
 #include <iostream>
-#include <string>
 #include <vector>
 
 #define CHECK_CUDA(call)                                                       \
@@ -41,7 +40,6 @@ __device__ float d_ALPHA;
 __device__ float d_GAMMA;
 __device__ float d_EPSILON;
 __device__ int d_EPISODES;
-// __device__ int d_MAX_STEPS_PER_EPISODE;
 
 // Utility function for atomic Q-value update
 __device__ void atomicUpdateQ(int x, int y, int action, float tdTarget,
@@ -77,17 +75,17 @@ __global__ void resetAgentsKernel() {
   }
 }
 
-// Kernel: each agent chooses an action, steps, updates Q
 __global__ void stepAgentsKernel(SimpleCurand *randStates, int *d_done) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= d_N_AGENTS)
-    return;
-  if (d_active[i] == 0)
+  if (i >= d_N_AGENTS || d_active[i] == 0)
     return;
 
-  float r = deviceRand(&randStates[i]);
+  // 当前状态
   int x = d_agentX[i];
   int y = d_agentY[i];
+
+  // 选择当前动作 a（ε-greedy）
+  float r = deviceRand(&randStates[i]);
   int action = 0;
   if (r < d_EPSILON) {
     float rr = deviceRand(&randStates[i]) * 4.0f;
@@ -108,20 +106,22 @@ __global__ void stepAgentsKernel(SimpleCurand *randStates, int *d_done) {
     action = bestAct;
   }
 
+  // 执行动作，转移到新状态
   int oldX = x;
   int oldY = y;
-  if (action == 0) {
-    x = (x > 0) ? x - 1 : x;
-  } else if (action == 1) {
-    x = (x < d_SIZE - 1) ? x + 1 : x;
-  } else if (action == 2) {
-    y = (y > 0) ? y - 1 : y;
-  } else if (action == 3) {
-    y = (y < d_SIZE - 1) ? y + 1 : y;
-  }
+  if (action == 0 && x > 0)
+    x--;
+  else if (action == 1 && x < d_SIZE - 1)
+    x++;
+  else if (action == 2 && y > 0)
+    y--;
+  else if (action == 3 && y < d_SIZE - 1)
+    y++;
+
   d_agentX[i] = x;
   d_agentY[i] = y;
 
+  // 奖励函数 & 是否结束
   int reward = -1;
   bool doneLocal = false;
   if (isMineDev(x, y)) {
@@ -134,14 +134,34 @@ __global__ void stepAgentsKernel(SimpleCurand *randStates, int *d_done) {
     doneLocal = true;
   }
 
-  int baseNext = (x * d_SIZE + y) * 4;
-  float bestNext = d_Q[baseNext];
-  for (int a = 1; a < 4; a++) {
-    float val = d_Q[baseNext + a];
-    if (val > bestNext)
-      bestNext = val;
+  // 选择下一个动作 a'（ε-greedy）用于 SARSA 更新
+  int nextAction = 0;
+  float r2 = deviceRand(&randStates[i]);
+  if (r2 < d_EPSILON) {
+    float rr = deviceRand(&randStates[i]) * 4.0f;
+    nextAction = (int)rr;
+    if (nextAction > 3)
+      nextAction = 3;
+  } else {
+    int base = (x * d_SIZE + y) * 4;
+    float bestVal = d_Q[base];
+    int bestAct = 0;
+    for (int a = 1; a < 4; a++) {
+      float val = d_Q[base + a];
+      if (val > bestVal) {
+        bestVal = val;
+        bestAct = a;
+      }
+    }
+    nextAction = bestAct;
   }
-  float tdTarget = reward + (doneLocal ? 0.0f : d_GAMMA * bestNext);
+
+  // SARSA TD Target
+  int nextBase = (x * d_SIZE + y) * 4;
+  float qNext = d_Q[nextBase + nextAction];
+  float tdTarget = reward + (doneLocal ? 0.0f : d_GAMMA * qNext);
+
+  // Q(s,a) ← Q(s,a) + α (r + γ Q(s',a') - Q(s,a))
   atomicUpdateQ(oldX, oldY, action, tdTarget, d_ALPHA);
 
   if (doneLocal) {
