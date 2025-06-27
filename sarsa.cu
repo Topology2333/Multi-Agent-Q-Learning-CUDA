@@ -75,6 +75,63 @@ __global__ void resetAgentsKernel() {
   }
 }
 
+__device__ int selectAction(int x, int y, float epsilon, SimpleCurand *state) {
+  float r = deviceRand(state);
+  if (r < epsilon) {
+    float rr = deviceRand(state) * 4.0f;
+    int a = (int)rr;
+    return (a > 3) ? 3 : a;
+  } else {
+    int base = (x * d_SIZE + y) * 4;
+    float bestVal = d_Q[base];
+    int bestAct = 0;
+    for (int a = 1; a < 4; a++) {
+      float val = d_Q[base + a];
+      if (val > bestVal) {
+        bestVal = val;
+        bestAct = a;
+      }
+    }
+    return bestAct;
+  }
+}
+
+__device__ void takeAction(int &x, int &y, int action) {
+  if (action == 0 && x > 0)
+    x--;
+  else if (action == 1 && x < d_SIZE - 1)
+    x++;
+  else if (action == 2 && y > 0)
+    y--;
+  else if (action == 3 && y < d_SIZE - 1)
+    y++;
+}
+
+__device__ void evaluateReward(int x, int y, int &reward, bool &done,
+                               int agentId) {
+  reward = -1;
+  done = false;
+
+  if (isMineDev(x, y)) {
+    reward = -10;
+    d_active[agentId] = 0;
+    done = true;
+  } else if (x == d_FLAG_X && y == d_FLAG_Y) {
+    reward = 10;
+    d_active[agentId] = 0;
+    done = true;
+  }
+}
+
+__device__ void sarsaUpdate(int oldX, int oldY, int action, int nextX,
+                            int nextY, int nextAction, int reward, bool done) {
+  int nextBase = (nextX * d_SIZE + nextY) * 4;
+  float qNext = d_Q[nextBase + nextAction];
+  float tdTarget = reward + (done ? 0.0f : d_GAMMA * qNext);
+
+  atomicUpdateQ(oldX, oldY, action, tdTarget, d_ALPHA);
+}
+
 __global__ void stepAgentsKernel(SimpleCurand *randStates, int *d_done) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= d_N_AGENTS || d_active[i] == 0)
@@ -86,83 +143,26 @@ __global__ void stepAgentsKernel(SimpleCurand *randStates, int *d_done) {
 
   // 选择当前动作 a（ε-greedy）
   float r = deviceRand(&randStates[i]);
-  int action = 0;
-  if (r < d_EPSILON) {
-    float rr = deviceRand(&randStates[i]) * 4.0f;
-    action = (int)rr;
-    if (action > 3)
-      action = 3;
-  } else {
-    int base = (x * d_SIZE + y) * 4;
-    float bestVal = d_Q[base];
-    int bestAct = 0;
-    for (int a = 1; a < 4; a++) {
-      float val = d_Q[base + a];
-      if (val > bestVal) {
-        bestVal = val;
-        bestAct = a;
-      }
-    }
-    action = bestAct;
-  }
+  int action = selectAction(x, y, d_EPSILON, &randStates[i]);
 
   // 执行动作，转移到新状态
   int oldX = x;
   int oldY = y;
-  if (action == 0 && x > 0)
-    x--;
-  else if (action == 1 && x < d_SIZE - 1)
-    x++;
-  else if (action == 2 && y > 0)
-    y--;
-  else if (action == 3 && y < d_SIZE - 1)
-    y++;
+  takeAction(x, y, action);
 
   d_agentX[i] = x;
   d_agentY[i] = y;
 
   // 奖励函数 & 是否结束
-  int reward = -1;
-  bool doneLocal = false;
-  if (isMineDev(x, y)) {
-    reward = -10;
-    d_active[i] = 0;
-    doneLocal = true;
-  } else if (x == d_FLAG_X && y == d_FLAG_Y) {
-    reward = 10;
-    d_active[i] = 0;
-    doneLocal = true;
-  }
+  int reward;
+  bool doneLocal;
+  evaluateReward(x, y, reward, doneLocal, i);
 
   // 选择下一个动作 a'（ε-greedy）用于 SARSA 更新
-  int nextAction = 0;
-  float r2 = deviceRand(&randStates[i]);
-  if (r2 < d_EPSILON) {
-    float rr = deviceRand(&randStates[i]) * 4.0f;
-    nextAction = (int)rr;
-    if (nextAction > 3)
-      nextAction = 3;
-  } else {
-    int base = (x * d_SIZE + y) * 4;
-    float bestVal = d_Q[base];
-    int bestAct = 0;
-    for (int a = 1; a < 4; a++) {
-      float val = d_Q[base + a];
-      if (val > bestVal) {
-        bestVal = val;
-        bestAct = a;
-      }
-    }
-    nextAction = bestAct;
-  }
+  int nextAction = selectAction(x, y, d_EPSILON, &randStates[i]);
 
   // SARSA TD Target
-  int nextBase = (x * d_SIZE + y) * 4;
-  float qNext = d_Q[nextBase + nextAction];
-  float tdTarget = reward + (doneLocal ? 0.0f : d_GAMMA * qNext);
-
-  // Q(s,a) ← Q(s,a) + α (r + γ Q(s',a') - Q(s,a))
-  atomicUpdateQ(oldX, oldY, action, tdTarget, d_ALPHA);
+  sarsaUpdate(oldX, oldY, action, x, y, nextAction, reward, doneLocal);
 
   if (doneLocal) {
     atomicExch(&d_done[i], 1);
