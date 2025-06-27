@@ -375,6 +375,12 @@ int main(int argc, char **argv) {
   int *d_countActive;
   CHECK_CUDA(cudaMalloc(&d_countActive, sizeof(int)));
 
+  cudaEvent_t startEvent, stopEvent;
+  CHECK_CUDA(cudaEventCreate(&startEvent));
+  CHECK_CUDA(cudaEventCreate(&stopEvent));
+
+  CHECK_CUDA(cudaEventRecord(startEvent));
+
   for (int ep = 0; ep < episodes; ep++) {
     resetAgentsKernel<<<gridDims, blockDims>>>();
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -403,6 +409,13 @@ int main(int argc, char **argv) {
     }
   }
 
+  CHECK_CUDA(cudaEventRecord(stopEvent));
+  CHECK_CUDA(cudaEventSynchronize(stopEvent));
+  float milliseconds = 0;
+  CHECK_CUDA(cudaEventElapsedTime(&milliseconds, startEvent, stopEvent));
+  CHECK_CUDA(cudaEventDestroy(startEvent));
+  CHECK_CUDA(cudaEventDestroy(stopEvent));
+
   CHECK_CUDA(cudaFree(d_done));
   CHECK_CUDA(cudaFree(d_countActive));
 
@@ -410,6 +423,7 @@ int main(int argc, char **argv) {
       cudaMemcpy(h_Q.data(), d_QPtr, qSizeInBytes, cudaMemcpyDeviceToHost));
 
   printPolicyCPU(h_grid, h_Q, size, flag_x, flag_y);
+  printf("Training time: %.4f ms\n", milliseconds);
 
   CHECK_CUDA(cudaFree(d_randStates));
   CHECK_CUDA(cudaFree(d_agentXPtr));
