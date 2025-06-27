@@ -296,7 +296,12 @@ int main(int argc, char **argv) {
   placeMinesHost(size, n_mines, flag_x, flag_y, h_grid);
 
   // Q table
-  std::vector<float> h_Q(size * size * 4, 0.0f);
+  // use pinned memory
+  float *h_Q_pinned = nullptr;
+  size_t qSizeInBytes = size * size * 4 * sizeof(float);
+  CHECK_CUDA(
+      cudaHostAlloc((void **)&h_Q_pinned, qSizeInBytes, cudaHostAllocDefault));
+  std::fill(h_Q_pinned, h_Q_pinned + size * size * 4, 0.0f);
 
   // Agents
   std::vector<int> h_agentX(n_agents, 0);
@@ -305,7 +310,6 @@ int main(int argc, char **argv) {
 
   // Copy environment to device
   int gridSizeInBytes = size * size * sizeof(int);
-  int qSizeInBytes = size * size * 4 * sizeof(float);
   int agentSizeInBytes = n_agents * sizeof(int);
 
   int *d_gridPtr;
@@ -316,7 +320,7 @@ int main(int argc, char **argv) {
   float *d_QPtr;
   CHECK_CUDA(cudaMalloc(&d_QPtr, qSizeInBytes));
   CHECK_CUDA(
-      cudaMemcpy(d_QPtr, h_Q.data(), qSizeInBytes, cudaMemcpyHostToDevice));
+      cudaMemcpy(d_QPtr, h_Q_pinned, qSizeInBytes, cudaMemcpyHostToDevice));
 
   int *d_agentXPtr;
   CHECK_CUDA(cudaMalloc(&d_agentXPtr, agentSizeInBytes));
@@ -420,10 +424,14 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaFree(d_countActive));
 
   CHECK_CUDA(
-      cudaMemcpy(h_Q.data(), d_QPtr, qSizeInBytes, cudaMemcpyDeviceToHost));
+      cudaMemcpy(h_Q_pinned, d_QPtr, qSizeInBytes, cudaMemcpyDeviceToHost));
 
-  printPolicyCPU(h_grid, h_Q, size, flag_x, flag_y);
+  printPolicyCPU(h_grid,
+                 std::vector<float>(h_Q_pinned, h_Q_pinned + size * size * 4),
+                 size, flag_x, flag_y);
   printf("Training time: %.4f ms\n", milliseconds);
+
+  CHECK_CUDA(cudaFreeHost(h_Q_pinned));
 
   CHECK_CUDA(cudaFree(d_randStates));
   CHECK_CUDA(cudaFree(d_agentXPtr));
