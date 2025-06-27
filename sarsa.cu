@@ -258,10 +258,13 @@ __global__ void loopEpisodesKernel(SimpleCurand *randStates, int *d_done,
 
 int main(int argc, char **argv) {
   // cudaFree(0);
-  int size = 46;
-  int n_mines = 96;
-  int flag_x = 45;
-  int flag_y = 45;
+  int size = 512;
+  // int n_mines = 96;
+  int n_mines = 10485;
+  // int flag_x = 45;
+  int flag_x = 511;
+  // int flag_y = 45;
+  int flag_y = 511;
   int n_agents = 512;
   float alpha = 0.1f;
   float gamma = 0.9f;
@@ -307,23 +310,28 @@ int main(int argc, char **argv) {
   int gridSizeInBytes = size * size * sizeof(int);
   int agentSizeInBytes = n_agents * sizeof(int);
 
+  // use mempool
+  cudaMemPool_t memPool;
+  CHECK_CUDA(cudaDeviceGetDefaultMemPool(&memPool, 0));
+
   int *d_gridPtr;
-  CHECK_CUDA(cudaMalloc(&d_gridPtr, gridSizeInBytes));
+  CHECK_CUDA(cudaMallocAsync(&d_gridPtr, gridSizeInBytes, 0));
+  // CHECK_CUDA(cudaMalloc(&d_gridPtr, gridSizeInBytes));
   CHECK_CUDA(cudaMemcpy(d_gridPtr, h_grid.data(), gridSizeInBytes,
                         cudaMemcpyHostToDevice));
 
   float *d_QPtr = nullptr;
   size_t qSizeInBytes = size * size * 4 * sizeof(float);
-  CHECK_CUDA(cudaMalloc(&d_QPtr, qSizeInBytes));
+  CHECK_CUDA(cudaMallocAsync(&d_QPtr, qSizeInBytes, 0));
 
   int *d_agentXPtr;
-  CHECK_CUDA(cudaMalloc(&d_agentXPtr, agentSizeInBytes));
+  CHECK_CUDA(cudaMallocAsync(&d_agentXPtr, agentSizeInBytes, 0));
 
   int *d_agentYPtr;
-  CHECK_CUDA(cudaMalloc(&d_agentYPtr, agentSizeInBytes));
+  CHECK_CUDA(cudaMallocAsync(&d_agentYPtr, agentSizeInBytes, 0));
 
   int *d_activePtr;
-  CHECK_CUDA(cudaMalloc(&d_activePtr, agentSizeInBytes));
+  CHECK_CUDA(cudaMallocAsync(&d_activePtr, agentSizeInBytes, 0));
 
   CHECK_CUDA(cudaMemcpyToSymbol(d_grid, &d_gridPtr, sizeof(int *)));
   CHECK_CUDA(cudaMemcpyToSymbol(d_Q, &d_QPtr, sizeof(float *)));
@@ -343,7 +351,8 @@ int main(int argc, char **argv) {
 
   // Random states
   SimpleCurand *d_randStates;
-  CHECK_CUDA(cudaMalloc(&d_randStates, n_agents * sizeof(SimpleCurand)));
+  CHECK_CUDA(
+      cudaMallocAsync(&d_randStates, n_agents * sizeof(SimpleCurand), 0));
 
   int blocks = (n_agents + threads_per_block - 1) / threads_per_block;
   // init RNG
@@ -360,9 +369,9 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaDeviceSynchronize());
 
   int *d_done;
-  CHECK_CUDA(cudaMalloc(&d_done, n_agents * sizeof(int)));
+  CHECK_CUDA(cudaMallocAsync(&d_done, n_agents * sizeof(int), 0));
   int *d_countActive;
-  CHECK_CUDA(cudaMalloc(&d_countActive, sizeof(int)));
+  CHECK_CUDA(cudaMallocAsync(&d_countActive, sizeof(int), 0));
 
   cudaEvent_t startEvent, stopEvent;
   CHECK_CUDA(cudaEventCreate(&startEvent));
@@ -399,12 +408,12 @@ int main(int argc, char **argv) {
 
   CHECK_CUDA(cudaFreeHost(h_Q_pinned));
 
-  CHECK_CUDA(cudaFree(d_randStates));
-  CHECK_CUDA(cudaFree(d_agentXPtr));
-  CHECK_CUDA(cudaFree(d_agentYPtr));
-  CHECK_CUDA(cudaFree(d_activePtr));
-  CHECK_CUDA(cudaFree(d_gridPtr));
-  CHECK_CUDA(cudaFree(d_QPtr));
+  CHECK_CUDA(cudaFreeAsync(d_randStates, 0));
+  CHECK_CUDA(cudaFreeAsync(d_agentXPtr, 0));
+  CHECK_CUDA(cudaFreeAsync(d_agentYPtr, 0));
+  CHECK_CUDA(cudaFreeAsync(d_activePtr, 0));
+  CHECK_CUDA(cudaFreeAsync(d_gridPtr, 0));
+  CHECK_CUDA(cudaFreeAsync(d_QPtr, 0));
 
   return 0;
 }
