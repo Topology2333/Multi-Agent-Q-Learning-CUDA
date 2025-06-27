@@ -252,7 +252,7 @@ __global__ void loopEpisodesKernel(SimpleCurand *randStates, int *d_done,
   for (int ep = 0; ep < episodes; ++ep) {
     d_done[i] = 0;
     runOneEpisode(randStates, d_done, maxSteps);
-    __syncthreads();
+    // __syncthreads();
   }
 }
 
