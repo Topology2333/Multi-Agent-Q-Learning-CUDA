@@ -235,12 +235,24 @@ __device__ void runOneEpisode(SimpleCurand *randStates, int *d_done,
   }
 }
 
+__device__ void initQEntry(int agentId, int size) {
+  int totalEntries = size * size * 4;
+  int stride = gridDim.x * blockDim.x;
+
+  // by sequence
+  for (int idx = agentId; idx < totalEntries; idx += stride) {
+    d_Q[idx] = 0.0f;
+  }
+}
+
 __global__ void loopEpisodesKernel(SimpleCurand *randStates, int *d_done,
                                    int maxSteps, int episodes) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (i >= d_N_AGENTS || d_active[i] == 0)
     return;
+
+  initQEntry(i, d_SIZE);
 
   for (int ep = 0; ep < episodes; ++ep) {
     d_done[i] = 0;
@@ -295,14 +307,6 @@ int main(int argc, char **argv) {
   std::vector<int> h_grid(size * size, 0);
   placeMinesHost(size, n_mines, flag_x, flag_y, h_grid);
 
-  // Q table
-  // use pinned memory
-  float *h_Q_pinned = nullptr;
-  size_t qSizeInBytes = size * size * 4 * sizeof(float);
-  CHECK_CUDA(
-      cudaHostAlloc((void **)&h_Q_pinned, qSizeInBytes, cudaHostAllocDefault));
-  std::fill(h_Q_pinned, h_Q_pinned + size * size * 4, 0.0f);
-
   // Agents
   std::vector<int> h_agentX(n_agents, 0);
   std::vector<int> h_agentY(n_agents, 0);
@@ -317,10 +321,9 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaMemcpy(d_gridPtr, h_grid.data(), gridSizeInBytes,
                         cudaMemcpyHostToDevice));
 
-  float *d_QPtr;
+  float *d_QPtr = nullptr;
+  size_t qSizeInBytes = size * size * 4 * sizeof(float);
   CHECK_CUDA(cudaMalloc(&d_QPtr, qSizeInBytes));
-  CHECK_CUDA(
-      cudaMemcpy(d_QPtr, h_Q_pinned, qSizeInBytes, cudaMemcpyHostToDevice));
 
   int *d_agentXPtr;
   CHECK_CUDA(cudaMalloc(&d_agentXPtr, agentSizeInBytes));
@@ -398,6 +401,10 @@ int main(int argc, char **argv) {
 
   CHECK_CUDA(cudaFree(d_done));
   CHECK_CUDA(cudaFree(d_countActive));
+
+  float *h_Q_pinned = nullptr;
+  CHECK_CUDA(
+      cudaHostAlloc((void **)&h_Q_pinned, qSizeInBytes, cudaHostAllocDefault));
 
   CHECK_CUDA(
       cudaMemcpy(h_Q_pinned, d_QPtr, qSizeInBytes, cudaMemcpyDeviceToHost));
