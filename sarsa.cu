@@ -373,15 +373,31 @@ int main(int argc, char **argv) {
 
   CHECK_CUDA(cudaEventRecord(startEvent));
 
-  for (int ep = 0; ep < episodes; ep++) {
-    resetAgentsKernel<<<gridDims, blockDims>>>();
-    CHECK_CUDA(cudaDeviceSynchronize());
+  // use cuda graph
+  cudaGraph_t graph;
+  cudaGraphExec_t graphExec;
+  cudaStream_t captureStream;
+  CHECK_CUDA(cudaStreamCreate(&captureStream));
 
-    CHECK_CUDA(cudaMemset(d_done, 0, n_agents * sizeof(int)));
-    loopStepsKernel<<<gridDims, blockDims>>>(d_randStates, d_done,
-                                             max_steps_per_episode);
-    CHECK_CUDA(cudaDeviceSynchronize());
+  CHECK_CUDA(
+      cudaStreamBeginCapture(captureStream, cudaStreamCaptureModeGlobal));
+  resetAgentsKernel<<<gridDims, blockDims, 0, captureStream>>>();
+  CHECK_CUDA(cudaMemsetAsync(d_done, 0, n_agents * sizeof(int),
+                             captureStream)); // async version
+  loopStepsKernel<<<gridDims, blockDims, 0, captureStream>>>(
+      d_randStates, d_done, max_steps_per_episode);
+  // CHECK_CUDA(cudaDeviceSynchronize());
+  CHECK_CUDA(cudaStreamEndCapture(captureStream, &graph));
+  CHECK_CUDA(cudaGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
+
+  for (int ep = 0; ep < episodes; ep++) {
+    CHECK_CUDA(cudaGraphLaunch(graphExec, captureStream));
+    CHECK_CUDA(cudaStreamSynchronize(captureStream));
   }
+
+  CHECK_CUDA(cudaGraphExecDestroy(graphExec));
+  CHECK_CUDA(cudaGraphDestroy(graph));
+  CHECK_CUDA(cudaStreamDestroy(captureStream));
 
   CHECK_CUDA(cudaEventRecord(stopEvent));
   CHECK_CUDA(cudaEventSynchronize(stopEvent));
