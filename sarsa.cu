@@ -65,16 +65,6 @@ __device__ bool isMineDev(int x, int y) {
   return (d_grid[x * d_SIZE + y] == -1);
 }
 
-// Kernel: reset agents
-__global__ void resetAgentsKernel() {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < d_N_AGENTS) {
-    d_agentX[i] = 0;
-    d_agentY[i] = 0;
-    d_active[i] = 1;
-  }
-}
-
 __device__ int selectAction(int x, int y, float epsilon, SimpleCurand *state) {
   float r = deviceRand(state);
   if (r < epsilon) {
@@ -249,8 +239,13 @@ __global__ void loopEpisodesKernel(SimpleCurand *randStates, int *d_done,
                                    int maxSteps, int episodes) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-  if (i >= d_N_AGENTS || d_active[i] == 0)
+  if (i >= d_N_AGENTS)
     return;
+
+  // init for the whole ep
+  d_agentX[i] = 0;
+  d_agentY[i] = 0;
+  d_active[i] = 1;
 
   initQEntry(i, d_SIZE);
 
@@ -262,6 +257,7 @@ __global__ void loopEpisodesKernel(SimpleCurand *randStates, int *d_done,
 }
 
 int main(int argc, char **argv) {
+  // cudaFree(0);
   int size = 46;
   int n_mines = 96;
   int flag_x = 45;
@@ -355,9 +351,6 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaMemcpyToSymbol(d_GAMMA, &gamma, sizeof(float)));
   CHECK_CUDA(cudaMemcpyToSymbol(d_EPSILON, &epsilon, sizeof(float)));
   CHECK_CUDA(cudaMemcpyToSymbol(d_EPISODES, &episodes, sizeof(int)));
-  // CHECK_CUDA(cudaMemcpyToSymbol(d_MAX_STEPS_PER_EPISODE,
-  // &max_steps_per_episode,
-  //                            sizeof(int)));
 
   // Random states
   SimpleCurand *d_randStates;
@@ -396,6 +389,7 @@ int main(int argc, char **argv) {
   CHECK_CUDA(cudaEventSynchronize(stopEvent));
   float milliseconds = 0;
   CHECK_CUDA(cudaEventElapsedTime(&milliseconds, startEvent, stopEvent));
+
   CHECK_CUDA(cudaEventDestroy(startEvent));
   CHECK_CUDA(cudaEventDestroy(stopEvent));
 
