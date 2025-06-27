@@ -303,11 +303,6 @@ int main(int argc, char **argv) {
   std::vector<int> h_grid(size * size, 0);
   placeMinesHost(size, n_mines, flag_x, flag_y, h_grid);
 
-  // Agents
-  std::vector<int> h_agentX(n_agents, 0);
-  std::vector<int> h_agentY(n_agents, 0);
-  std::vector<int> h_active(n_agents, 1);
-
   // Copy environment to device
   int gridSizeInBytes = size * size * sizeof(int);
   int agentSizeInBytes = n_agents * sizeof(int);
@@ -323,18 +318,12 @@ int main(int argc, char **argv) {
 
   int *d_agentXPtr;
   CHECK_CUDA(cudaMalloc(&d_agentXPtr, agentSizeInBytes));
-  CHECK_CUDA(cudaMemcpy(d_agentXPtr, h_agentX.data(), agentSizeInBytes,
-                        cudaMemcpyHostToDevice));
 
   int *d_agentYPtr;
   CHECK_CUDA(cudaMalloc(&d_agentYPtr, agentSizeInBytes));
-  CHECK_CUDA(cudaMemcpy(d_agentYPtr, h_agentY.data(), agentSizeInBytes,
-                        cudaMemcpyHostToDevice));
 
   int *d_activePtr;
   CHECK_CUDA(cudaMalloc(&d_activePtr, agentSizeInBytes));
-  CHECK_CUDA(cudaMemcpy(d_activePtr, h_active.data(), agentSizeInBytes,
-                        cudaMemcpyHostToDevice));
 
   CHECK_CUDA(cudaMemcpyToSymbol(d_grid, &d_gridPtr, sizeof(int *)));
   CHECK_CUDA(cudaMemcpyToSymbol(d_Q, &d_QPtr, sizeof(float *)));
