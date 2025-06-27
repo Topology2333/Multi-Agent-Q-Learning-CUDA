@@ -132,62 +132,6 @@ __device__ void sarsaUpdate(int oldX, int oldY, int action, int nextX,
   atomicUpdateQ(oldX, oldY, action, tdTarget, d_ALPHA);
 }
 
-__global__ void stepAgentsKernel(SimpleCurand *randStates, int *d_done) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= d_N_AGENTS || d_active[i] == 0)
-    return;
-
-  // 当前状态
-  int x = d_agentX[i];
-  int y = d_agentY[i];
-
-  // 选择当前动作 a（ε-greedy）
-  float r = deviceRand(&randStates[i]);
-  int action = selectAction(x, y, d_EPSILON, &randStates[i]);
-
-  // 执行动作，转移到新状态
-  int oldX = x;
-  int oldY = y;
-  takeAction(x, y, action);
-
-  d_agentX[i] = x;
-  d_agentY[i] = y;
-
-  // 奖励函数 & 是否结束
-  int reward;
-  bool doneLocal;
-  evaluateReward(x, y, reward, doneLocal, i);
-
-  // 选择下一个动作 a'（ε-greedy）用于 SARSA 更新
-  int nextAction = selectAction(x, y, d_EPSILON, &randStates[i]);
-
-  // SARSA TD Target
-  sarsaUpdate(oldX, oldY, action, x, y, nextAction, reward, doneLocal);
-
-  if (doneLocal) {
-    atomicExch(&d_done[i], 1);
-  }
-}
-
-// Kernel: count active agents
-__global__ void countActiveKernel(int *d_count) {
-  __shared__ int blockCount;
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (threadIdx.x == 0)
-    blockCount = 0;
-  __syncthreads();
-
-  int value = 0;
-  if (i < d_N_AGENTS && d_active[i] == 1) {
-    value = 1;
-  }
-  atomicAdd(&blockCount, value);
-  __syncthreads();
-  if (threadIdx.x == 0) {
-    atomicAdd(d_count, blockCount);
-  }
-}
-
 // Kernel: init RNG states
 __global__ void initRandKernel(SimpleCurand *randStates, unsigned int seed) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -246,6 +190,50 @@ void printPolicyCPU(const std::vector<int> &h_grid,
         std::cout << "> ";
     }
     std::cout << "\n";
+  }
+}
+
+__global__ void loopStepsKernel(SimpleCurand *randStates, int *d_done,
+                                int maxSteps) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= d_N_AGENTS || d_active[i] == 0)
+    return;
+
+  int step = 0;
+
+  // 初始状态
+  int x = d_agentX[i];
+  int y = d_agentY[i];
+
+  while (step < maxSteps && d_done[i] == 0) {
+    // --- 当前动作选择 ---
+    int action = selectAction(x, y, d_EPSILON, &randStates[i]);
+
+    // --- 保存旧状态 ---
+    int oldX = x, oldY = y;
+
+    // --- 执行动作，更新状态 ---
+    takeAction(x, y, action);
+    d_agentX[i] = x;
+    d_agentY[i] = y;
+
+    // --- 奖励评估 ---
+    int reward;
+    bool doneLocal;
+    evaluateReward(x, y, reward, doneLocal, i);
+
+    // --- 下一个动作 ---
+    int nextAction = selectAction(x, y, d_EPSILON, &randStates[i]);
+
+    // --- SARSA 更新 ---
+    sarsaUpdate(oldX, oldY, action, x, y, nextAction, reward, doneLocal);
+
+    // --- 终止标志 ---
+    if (doneLocal) {
+      atomicExch(&d_done[i], 1);
+    }
+
+    step++;
   }
 }
 
@@ -389,28 +377,10 @@ int main(int argc, char **argv) {
     resetAgentsKernel<<<gridDims, blockDims>>>();
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    int stepCount = 0;
-    while (stepCount < max_steps_per_episode) {
-      stepCount++;
-      cudaMemset(d_done, 0, n_agents * sizeof(int));
-
-      stepAgentsKernel<<<gridDims, blockDims>>>(d_randStates, d_done);
-      CHECK_CUDA(cudaDeviceSynchronize());
-
-      CHECK_CUDA(cudaMemset(d_countActive, 0, sizeof(int)));
-
-      countActiveKernel<<<gridDims, blockDims>>>(d_countActive);
-      CHECK_CUDA(cudaDeviceSynchronize());
-
-      int h_countActive = 0;
-      CHECK_CUDA(cudaMemcpy(&h_countActive, d_countActive, sizeof(int),
-                            cudaMemcpyDeviceToHost));
-
-      if (h_countActive == 0)
-        break;
-      if ((float)h_countActive < 0.2f * (float)n_agents)
-        break;
-    }
+    CHECK_CUDA(cudaMemset(d_done, 0, n_agents * sizeof(int)));
+    loopStepsKernel<<<gridDims, blockDims>>>(d_randStates, d_done,
+                                             max_steps_per_episode);
+    CHECK_CUDA(cudaDeviceSynchronize());
   }
 
   CHECK_CUDA(cudaEventRecord(stopEvent));
